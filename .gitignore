@@ -1,0 +1,21 @@
+# Python cache files
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+
+# Local environment and config
+.env
+config.json
+
+# Local database or user data
+bot_db.json
+
+# Log files
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
