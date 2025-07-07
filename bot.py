@@ -2,24 +2,22 @@ import os
 import re
 import json
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,
-    CallbackQueryHandler
 )
 from twilio.rest import Client
 
-# বেসিক কনফিগারেশন
-BOT_TOKEN = "7561627181:AAGKJdb-8zBY021M68Q4ca-GcEWQurXMtaE"  # আপনার বট টোকেন
-ADMIN_ID = 6569537485  # আপনার টেলিগ্রাম আইডি
+# Config
+BOT_TOKEN = "7561627181:AAGKJdb-8zBY021M68Q4ca-GcEWQurXMtaE"
+ADMIN_ID = 6569537485
 DB_FILE = "bot_db.json"
-AREA_CODES = ["+1", "+44", "+81", "+86", "+91"]  # US, UK, Japan, China, India
 
-# ডাটাবেস ফাংশন
+# DB Functions
 def load_db():
     try:
         with open(DB_FILE, "r") as f:
@@ -31,16 +29,16 @@ def save_db(data):
     with open(DB_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# টুইলিও ভ্যালিডেশন
+# Twilio Validate
 async def validate_twilio_credentials(sid, token):
     try:
         client = Client(sid, token)
-        client.api.accounts(sid).fetch()  # টেস্ট রিকুয়েস্ট
+        client.api.accounts(sid).fetch()
         return True
     except:
         return False
 
-# মেনু সিস্টেম
+# Main Menu
 def main_menu(is_admin=False, has_twilio=False):
     buttons = [
         ["🔍 Search Number", "🎲 Random Number"],
@@ -53,10 +51,11 @@ def main_menu(is_admin=False, has_twilio=False):
         buttons.append(["👮 Admin Panel"])
     return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
 
+# Start Command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     db = load_db()
-    
+
     if user_id not in db["users"]:
         db["users"][user_id] = {
             "name": update.effective_user.full_name,
@@ -68,13 +67,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if user_id != str(ADMIN_ID):
             db["pending_approvals"].append(user_id)
         save_db(db)
-    
+
     user_data = db["users"][user_id]
-    
+
     if not user_data["approved"]:
         await update.message.reply_text("⏳ Your account is pending admin approval.")
         return
-    
+
     await update.message.reply_text(
         "📱 Twilio Number Manager\n\n"
         "Please login with your Twilio credentials first.",
@@ -84,33 +83,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     )
 
+# Handle Twilio Login
 async def handle_twilio_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Please enter your Twilio credentials:\n\n"
-        "Format: <code>SID|AuthToken</code>\n\n"
-        "Example:\n"
-        "<code>ACa2b3c4d5e6f7g8h9i0j1k2l3m4n5o6|34a5b6c7d8e9f0g1h2i3j4k5l6m7d8</code>",
+        "Format: <code>SID|AuthToken</code>",
         parse_mode="HTML"
     )
 
+# Process Twilio Credentials
 async def process_twilio_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     text = update.message.text.strip()
     db = load_db()
-    
+
     try:
         sid, token = text.split("|", 1)
         sid, token = sid.strip(), token.strip()
-        
+
         if not (len(sid) == 34 and sid.startswith("AC") and len(token) == 32):
             raise ValueError("Invalid format")
-        
+
         if not await validate_twilio_credentials(sid, token):
             raise ValueError("Invalid credentials")
-        
+
         db["users"][user_id]["twilio"] = {"sid": sid, "token": token}
         save_db(db)
-        
+
         await update.message.reply_text(
             "✅ Twilio login successful!",
             reply_markup=main_menu(
@@ -121,10 +120,31 @@ async def process_twilio_credentials(update: Update, context: ContextTypes.DEFAU
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {str(e)}")
 
-# ... (বাকি ফাংশনগুলো আগের মতোই থাকবে)
+# Admin: Approve User
+async def approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.effective_user.id) != str(ADMIN_ID):
+        await update.message.reply_text("❌ You are not authorized to approve users.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text("Usage: /approve <user_id>")
+        return
+
+    user_id = args[0]
+    db = load_db()
+
+    if user_id in db["users"]:
+        db["users"][user_id]["approved"] = True
+        if user_id in db["pending_approvals"]:
+            db["pending_approvals"].remove(user_id)
+        save_db(db)
+        await update.message.reply_text(f"✅ User {user_id} approved successfully.")
+    else:
+        await update.message.reply_text("❌ User not found.")
 
 if __name__ == "__main__":
-    # ডাটাবেস ইনিশিয়ালাইজ
+    # Init DB
     if not os.path.exists(DB_FILE):
         save_db({
             "users": {
@@ -138,16 +158,13 @@ if __name__ == "__main__":
             },
             "pending_approvals": []
         })
-    
-    # বট অ্যাপ্লিকেশন তৈরি
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    
-    # হ্যান্ডলার যোগ
+
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("approve", approve))
     app.add_handler(MessageHandler(filters.Regex(r'^🔑 Login with Twilio$'), handle_twilio_login))
     app.add_handler(MessageHandler(filters.TEXT & filters.Regex(r'^AC\w+\|.+\w$'), process_twilio_credentials))
-    
-    # ... (অন্যান্য হ্যান্ডলার যোগ করুন)
-    
-    print("🤖 বট চালু হয়েছে...")
+
+    print("🤖 Bot is running...")
     app.run_polling()
